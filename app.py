@@ -3,7 +3,13 @@ import time
 import uuid
 from datetime import datetime
 
-from flask import Flask, request, jsonify, render_template, send_from_directory
+from flask import (
+    Flask,
+    request,
+    jsonify,
+    render_template,
+    send_from_directory,
+)
 
 from google import genai
 from google.genai import types
@@ -14,15 +20,22 @@ from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+)
+from reportlab.lib.styles import (
+    getSampleStyleSheet,
+    ParagraphStyle,
+)
 from reportlab.lib.enums import TA_CENTER
 
 from dotenv import load_dotenv
 
 
 # ============================================================
-# LOAD ENVIRONMENT
+# ENVIRONMENT
 # ============================================================
 
 load_dotenv()
@@ -34,29 +47,54 @@ load_dotenv()
 
 app = Flask(__name__)
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Vercel allows writing inside /tmp
 GENERATED_DIR = os.path.join("/tmp", "qraft_generated")
 os.makedirs(GENERATED_DIR, exist_ok=True)
 
 
 # ============================================================
-# GEMINI CLIENT
+# GEMINI SETTINGS
 # ============================================================
 
-client = genai.Client(
-    api_key=os.environ.get("GEMINI_API_KEY")
+# Fast model.
+# You can change this from Vercel Environment Variables using
+# GEMINI_MODEL if required.
+MODEL = os.environ.get(
+    "GEMINI_MODEL",
+    "gemini-3.5-flash-lite"
 )
 
-MODEL = "gemini-2.5-flash"
+
+def get_gemini_client():
+    """
+    Create Gemini client only when generation is requested.
+    This prevents the whole Flask app from crashing if the
+    environment variable is missing.
+    """
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+
+    if not api_key:
+        raise RuntimeError(
+            "GEMINI_API_KEY is not configured."
+        )
+
+    return genai.Client(
+        api_key=api_key
+    )
 
 
 # ============================================================
-# FAST GEMINI CONFIG
+# FAST GENERATION CONFIG
 # ============================================================
+
+# IMPORTANT:
+# Do NOT use thinking_budget here.
+# Your installed google-genai version rejected it.
 
 FAST_CONFIG = types.GenerateContentConfig(
-    thinking_config=types.ThinkingConfig(
-        thinking_budget=0
-    ),
     max_output_tokens=2500,
 )
 
@@ -66,12 +104,30 @@ FAST_CONFIG = types.GenerateContentConfig(
 # ============================================================
 
 K_LEVEL_DEFS = {
-    "K1": "Remember - recall facts, terms, basic concepts (define, list, state, name)",
-    "K2": "Understand - explain ideas or concepts (explain, describe, summarize, classify)",
-    "K3": "Apply - use information in new situations (solve, demonstrate, apply, calculate)",
-    "K4": "Analyze - draw connections among ideas (compare, differentiate, examine, categorize)",
-    "K5": "Evaluate - justify a stand or decision (justify, critique, assess, argue)",
-    "K6": "Create - produce new or original work (design, develop, formulate, propose)",
+
+    "K1":
+        "Remember - recall facts, terms, basic concepts "
+        "(define, list, state, name)",
+
+    "K2":
+        "Understand - explain ideas or concepts "
+        "(explain, describe, summarize, classify)",
+
+    "K3":
+        "Apply - use information in new situations "
+        "(solve, demonstrate, apply, calculate)",
+
+    "K4":
+        "Analyze - draw connections among ideas "
+        "(compare, differentiate, examine, categorize)",
+
+    "K5":
+        "Evaluate - justify a stand or decision "
+        "(justify, critique, assess, argue)",
+
+    "K6":
+        "Create - produce new or original work "
+        "(design, develop, formulate, propose)",
 }
 
 
@@ -80,6 +136,7 @@ K_LEVEL_DEFS = {
 # ============================================================
 
 EXAM_DEFAULTS = {
+
     "CIA 1": {
         "start": "K1",
         "end": "K3",
@@ -114,32 +171,58 @@ EXAM_DEFAULTS = {
 # QUESTION DISTRIBUTION
 # ============================================================
 
-def distribute_questions(start_level, end_level, total_questions):
+def distribute_questions(
+    start_level,
+    end_level,
+    total_questions
+):
 
-    levels_order = list(K_LEVEL_DEFS.keys())
+    levels_order = list(
+        K_LEVEL_DEFS.keys()
+    )
 
-    start_idx = levels_order.index(start_level)
-    end_idx = levels_order.index(end_level)
+    start_idx = levels_order.index(
+        start_level
+    )
+
+    end_idx = levels_order.index(
+        end_level
+    )
 
     selected_levels = levels_order[
         start_idx:end_idx + 1
     ]
 
-    num_levels = len(selected_levels)
+    number_of_levels = len(
+        selected_levels
+    )
 
-    base = total_questions // num_levels
-    remainder = total_questions % num_levels
+    base = (
+        total_questions //
+        number_of_levels
+    )
+
+    remainder = (
+        total_questions %
+        number_of_levels
+    )
 
     distribution = {
         level: 0
         for level in levels_order
     }
 
-    for i, level in enumerate(selected_levels):
+    for i, level in enumerate(
+        selected_levels
+    ):
 
         distribution[level] = (
             base +
-            (1 if i < remainder else 0)
+            (
+                1
+                if i < remainder
+                else 0
+            )
         )
 
     return distribution
@@ -155,27 +238,49 @@ def build_section_distribution(
     total_questions
 ):
 
-    levels_order = list(K_LEVEL_DEFS.keys())
+    levels_order = list(
+        K_LEVEL_DEFS.keys()
+    )
 
-    start_idx = levels_order.index(start_level)
-    end_idx = levels_order.index(end_level)
+    start_idx = levels_order.index(
+        start_level
+    )
+
+    end_idx = levels_order.index(
+        end_level
+    )
 
     selected_levels = levels_order[
         start_idx:end_idx + 1
     ]
 
-    number_of_levels = len(selected_levels)
+    number_of_levels = len(
+        selected_levels
+    )
 
-    base = total_questions // number_of_levels
-    remainder = total_questions % number_of_levels
+    base = (
+        total_questions //
+        number_of_levels
+    )
+
+    remainder = (
+        total_questions %
+        number_of_levels
+    )
 
     distribution = {}
 
-    for i, level in enumerate(selected_levels):
+    for i, level in enumerate(
+        selected_levels
+    ):
 
         distribution[level] = (
             base +
-            (1 if i < remainder else 0)
+            (
+                1
+                if i < remainder
+                else 0
+            )
         )
 
     return distribution
@@ -195,30 +300,36 @@ def build_prompt(
 
     level_lines = []
 
-    total_q = 0
+    total_questions = 0
 
-    for level, count in k_distribution.items():
+    for level, count in (
+        k_distribution.items()
+    ):
 
         if count > 0:
 
             level_lines.append(
-                f"- {level} ({K_LEVEL_DEFS[level]}): "
+                f"{level} - "
+                f"{K_LEVEL_DEFS[level]}: "
                 f"{count} question(s)"
             )
 
-            total_q += count
+            total_questions += count
 
     total_marks = (
-        total_q *
+        total_questions *
         marks_per_question
     )
 
     prompt = f"""
-You are an experienced university question paper setter.
+You are an expert university examination
+question paper setter.
 
-Create a formal question paper strictly from the CORE CONTENT.
+Create a formal question paper.
 
-Do NOT invent topics outside the CORE CONTENT.
+IMPORTANT:
+Use ONLY the CORE CONTENT provided below.
+Do not invent topics outside the CORE CONTENT.
 
 EXAM TITLE:
 {exam_title}
@@ -232,29 +343,31 @@ CORE CONTENT:
 K-LEVEL DISTRIBUTION:
 {chr(10).join(level_lines)}
 
-RULES:
+REQUIREMENTS:
 
-1. Generate exactly {total_q} questions.
+1. Generate exactly {total_questions} questions.
 
-2. Each question must have {marks_per_question} marks.
+2. Every question carries exactly
+{marks_per_question} marks.
 
 3. Total marks must be {total_marks}.
 
-4. Every question must be tagged with its K-Level.
+4. Every question must have a K-Level tag.
 
-5. Number questions sequentially.
+5. Number questions continuously.
 
 6. Group questions according to K-Level.
 
-7. Questions must be answerable only from the provided CORE CONTENT.
+7. Do not repeat questions.
 
-8. Do not repeat questions.
+8. Questions must be answerable using
+only the CORE CONTENT.
 
 9. Use clear university examination language.
 
-10. Output ONLY the question paper.
+10. Do not add explanations.
 
-FORMAT:
+OUTPUT FORMAT:
 
 Section A - K1 (Remember)
 
@@ -264,14 +377,21 @@ Section B - K2 (Understand)
 
 2. Question text [K2] ({marks_per_question} marks)
 
-Continue only for levels having questions.
+Continue only for K-levels that contain
+questions.
 
-At the end:
+At the end write:
 
 TOTAL MARKS: {total_marks}
+
+Output ONLY the question paper.
 """
 
-    return prompt, total_marks, total_q
+    return (
+        prompt,
+        total_marks,
+        total_questions
+    )
 
 
 # ============================================================
@@ -298,15 +418,24 @@ def build_pattern_prompt(
         )
 
         question_count = int(
-            section.get("question_count", 0)
+            section.get(
+                "question_count",
+                0
+            )
         )
 
         marks = int(
-            section.get("marks", 0)
+            section.get(
+                "marks",
+                0
+            )
         )
 
         has_choice = bool(
-            section.get("has_choice", False)
+            section.get(
+                "has_choice",
+                False
+            )
         )
 
         k_levels = section.get(
@@ -314,7 +443,9 @@ def build_pattern_prompt(
             {}
         )
 
-        total_questions += question_count
+        total_questions += (
+            question_count
+        )
 
         total_marks += (
             question_count *
@@ -329,24 +460,28 @@ def build_pattern_prompt(
             "K3",
             "K4",
             "K5",
-            "K6"
+            "K6",
         ]:
 
             count = int(
-                k_levels.get(level, 0)
+                k_levels.get(
+                    level,
+                    0
+                )
             )
 
             if count > 0:
 
                 k_level_text.append(
-                    f"{level}: {count} question(s)"
+                    f"{level}: "
+                    f"{count} question(s)"
                 )
 
         if has_choice:
 
             choice_text = (
-                "YES - Every question must have "
-                "A OR B choice."
+                "YES - Every question "
+                "must have A OR B choice."
             )
 
         else:
@@ -355,7 +490,8 @@ def build_pattern_prompt(
 
         pattern_details.append(
             f"""
-SECTION: {section_name}
+SECTION:
+{section_name}
 
 QUESTIONS:
 {question_count}
@@ -372,7 +508,8 @@ K-LEVEL:
         )
 
     prompt = f"""
-You are an expert university examination question paper setter.
+You are an expert university examination
+question paper setter.
 
 Create ONE COMPLETE QUESTION PAPER.
 
@@ -407,7 +544,7 @@ STRICT RULES:
 
 8. Number questions continuously.
 
-9. If internal choice is YES:
+9. If INTERNAL CHOICE is YES:
 
 (A) Question [K-Level] (marks)
 
@@ -415,13 +552,13 @@ OR
 
 (B) Alternative Question [K-Level] (marks)
 
-10. A and B should have similar difficulty.
+10. A and B must have similar difficulty.
 
 11. Use clear university examination language.
 
 12. Output ONLY the question paper.
 
-At the end:
+At the end write:
 
 TOTAL QUESTIONS: {total_questions}
 
@@ -436,22 +573,27 @@ TOTAL MARKS: {total_marks}
 
 
 # ============================================================
-# FAST GEMINI GENERATION FUNCTION
+# GEMINI GENERATION
 # ============================================================
 
 def generate_with_gemini(prompt):
 
     last_error = None
 
-    # Maximum 3 attempts only
+    # Only 3 attempts.
+    # This prevents the website from hanging forever.
     for attempt in range(1, 4):
 
         try:
 
-            response = client.models.generate_content(
-                model=MODEL,
-                contents=prompt,
-                config=FAST_CONFIG
+            client = get_gemini_client()
+
+            response = (
+                client.models.generate_content(
+                    model=MODEL,
+                    contents=prompt,
+                    config=FAST_CONFIG,
+                )
             )
 
             text = (
@@ -460,34 +602,54 @@ def generate_with_gemini(prompt):
 
             if text:
 
-                return text, None
+                return (
+                    text,
+                    None
+                )
 
-            return "", "AI returned an empty response."
+            return (
+                "",
+                "AI returned an empty response."
+            )
 
         except Exception as e:
 
             last_error = e
 
-            error_str = str(e).lower()
+            error_str = (
+                str(e).lower()
+            )
 
-            # Retry only temporary Gemini errors
-            if (
+            temporary_error = (
                 "503" in error_str
-                or "unavailable" in error_str
-                or "overloaded" in error_str
-                or "429" in error_str
-                or "rate" in error_str
+                or
+                "unavailable" in error_str
+                or
+                "overloaded" in error_str
+                or
+                "429" in error_str
+                or
+                "rate limit" in error_str
+                or
+                "resource exhausted" in error_str
+            )
+
+            if (
+                temporary_error
+                and attempt < 3
             ):
 
-                # Short retry delay
-                if attempt < 3:
-                    time.sleep(1)
+                # Short delay
+                time.sleep(1)
 
-                    continue
+                continue
 
             break
 
-    return None, str(last_error)
+    return (
+        None,
+        str(last_error)
+    )
 
 
 # ============================================================
@@ -505,6 +667,20 @@ def index():
 
 
 # ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.route("/health")
+def health():
+
+    return jsonify({
+        "status": "ok",
+        "service": "Qraft AI",
+        "model": MODEL,
+    })
+
+
+# ============================================================
 # UPLOAD SYLLABUS
 # ============================================================
 
@@ -517,7 +693,8 @@ def upload_syllabus():
     if "file" not in request.files:
 
         return jsonify({
-            "error": "No file uploaded"
+            "error":
+            "No file uploaded"
         }), 400
 
     file = request.files["file"]
@@ -548,9 +725,12 @@ def upload_syllabus():
 
         elif filename.endswith(".txt"):
 
-            text = file.read().decode(
-                "utf-8",
-                errors="ignore"
+            text = (
+                file.read()
+                .decode(
+                    "utf-8",
+                    errors="ignore"
+                )
             )
 
         else:
@@ -591,7 +771,18 @@ def upload_syllabus():
 )
 def generate_question_paper():
 
-    data = request.get_json(force=True)
+    try:
+
+        data = request.get_json(
+            force=True
+        )
+
+    except Exception:
+
+        return jsonify({
+            "error":
+            "Invalid JSON request"
+        }), 400
 
     core_content = (
         data.get("core_content")
@@ -608,10 +799,28 @@ def generate_question_paper():
         or "Internal Assessment Test"
     ).strip()
 
-    marks_per_question = int(
-        data.get("marks_per_question")
-        or 5
-    )
+    try:
+
+        marks_per_question = int(
+            data.get(
+                "marks_per_question",
+                5
+            )
+        )
+
+        total_questions = int(
+            data.get(
+                "total_questions",
+                0
+            )
+        )
+
+    except Exception:
+
+        return jsonify({
+            "error":
+            "Marks and question count must be numbers"
+        }), 400
 
     start_level = (
         data.get("start_level")
@@ -623,19 +832,14 @@ def generate_question_paper():
         or "K4"
     )
 
-    total_questions = int(
-        data.get("total_questions")
-        or 0
-    )
-
     file_format = (
         data.get("format")
         or "docx"
     ).lower()
 
-    # -----------------------------
+    # --------------------------------------------------------
     # VALIDATION
-    # -----------------------------
+    # --------------------------------------------------------
 
     if not core_content:
 
@@ -649,6 +853,13 @@ def generate_question_paper():
         return jsonify({
             "error":
             "total_questions must be at least 1"
+        }), 400
+
+    if marks_per_question <= 0:
+
+        return jsonify({
+            "error":
+            "marks_per_question must be greater than 0"
         }), 400
 
     levels_order = list(
@@ -684,30 +895,36 @@ def generate_question_paper():
 
         file_format = "docx"
 
-    # -----------------------------
-    # BUILD PROMPT
-    # -----------------------------
+    # --------------------------------------------------------
+    # DISTRIBUTION
+    # --------------------------------------------------------
 
-    k_distribution = distribute_questions(
-        start_level,
-        end_level,
-        total_questions
+    k_distribution = (
+        distribute_questions(
+            start_level,
+            end_level,
+            total_questions
+        )
     )
 
-    prompt, total_marks, total_q = build_prompt(
-        core_content,
-        subject,
-        k_distribution,
-        marks_per_question,
-        exam_title
+    prompt, total_marks, total_q = (
+        build_prompt(
+            core_content,
+            subject,
+            k_distribution,
+            marks_per_question,
+            exam_title
+        )
     )
 
-    # -----------------------------
+    # --------------------------------------------------------
     # GEMINI
-    # -----------------------------
+    # --------------------------------------------------------
 
-    paper_text, error = generate_with_gemini(
-        prompt
+    paper_text, error = (
+        generate_with_gemini(
+            prompt
+        )
     )
 
     if error:
@@ -724,13 +941,14 @@ def generate_question_paper():
             "AI returned an empty response"
         }), 500
 
-    # -----------------------------
-    # CREATE FILE
-    # -----------------------------
+    # --------------------------------------------------------
+    # FILE CREATION
+    # --------------------------------------------------------
 
     filename_base = (
-        f"question_paper_"
-        f"{uuid.uuid4().hex[:8]}"
+        "question_paper_"
+        +
+        uuid.uuid4().hex[:8]
     )
 
     try:
@@ -738,7 +956,8 @@ def generate_question_paper():
         if file_format == "pdf":
 
             filename = (
-                f"{filename_base}.pdf"
+                filename_base
+                + ".pdf"
             )
 
             filepath = os.path.join(
@@ -757,7 +976,8 @@ def generate_question_paper():
         else:
 
             filename = (
-                f"{filename_base}.docx"
+                filename_base
+                + ".docx"
             )
 
             filepath = os.path.join(
@@ -810,7 +1030,18 @@ def generate_question_paper():
 )
 def generate_pattern_question_paper():
 
-    data = request.get_json(force=True)
+    try:
+
+        data = request.get_json(
+            force=True
+        )
+
+    except Exception:
+
+        return jsonify({
+            "error":
+            "Invalid JSON request"
+        }), 400
 
     core_content = (
         data.get("core_content")
@@ -837,9 +1068,9 @@ def generate_pattern_question_paper():
         or "docx"
     ).lower()
 
-    # -----------------------------
+    # --------------------------------------------------------
     # VALIDATION
-    # -----------------------------
+    # --------------------------------------------------------
 
     if not core_content:
 
@@ -857,19 +1088,28 @@ def generate_pattern_question_paper():
 
     for section in pattern:
 
-        question_count = int(
-            section.get(
-                "question_count",
-                0
-            )
-        )
+        try:
 
-        marks = int(
-            section.get(
-                "marks",
-                0
+            question_count = int(
+                section.get(
+                    "question_count",
+                    0
+                )
             )
-        )
+
+            marks = int(
+                section.get(
+                    "marks",
+                    0
+                )
+            )
+
+        except Exception:
+
+            return jsonify({
+                "error":
+                "Question count and marks must be numbers"
+            }), 400
 
         if question_count <= 0:
 
@@ -894,25 +1134,29 @@ def generate_pattern_question_paper():
 
         file_format = "docx"
 
-    # -----------------------------
+    # --------------------------------------------------------
     # BUILD PROMPT
-    # -----------------------------
+    # --------------------------------------------------------
 
-    prompt, total_marks, total_questions = (
-        build_pattern_prompt(
-            core_content,
-            subject,
-            pattern,
-            exam_title
-        )
+    (
+        prompt,
+        total_marks,
+        total_questions
+    ) = build_pattern_prompt(
+        core_content,
+        subject,
+        pattern,
+        exam_title
     )
 
-    # -----------------------------
+    # --------------------------------------------------------
     # GEMINI
-    # -----------------------------
+    # --------------------------------------------------------
 
-    paper_text, error = generate_with_gemini(
-        prompt
+    paper_text, error = (
+        generate_with_gemini(
+            prompt
+        )
     )
 
     if error:
@@ -929,13 +1173,14 @@ def generate_pattern_question_paper():
             "AI returned an empty response"
         }), 500
 
-    # -----------------------------
+    # --------------------------------------------------------
     # CREATE FILE
-    # -----------------------------
+    # --------------------------------------------------------
 
     filename_base = (
-        f"pattern_question_paper_"
-        f"{uuid.uuid4().hex[:8]}"
+        "pattern_question_paper_"
+        +
+        uuid.uuid4().hex[:8]
     )
 
     try:
@@ -943,7 +1188,8 @@ def generate_pattern_question_paper():
         if file_format == "pdf":
 
             filename = (
-                f"{filename_base}.pdf"
+                filename_base
+                + ".pdf"
             )
 
             filepath = os.path.join(
@@ -962,7 +1208,8 @@ def generate_pattern_question_paper():
         else:
 
             filename = (
-                f"{filename_base}.docx"
+                filename_base
+                + ".docx"
             )
 
             filepath = os.path.join(
@@ -1032,7 +1279,10 @@ def save_as_docx(
 
     doc = Document()
 
-    # Title
+    # --------------------------------------------------------
+    # TITLE
+    # --------------------------------------------------------
+
     title = doc.add_paragraph()
 
     title.alignment = (
@@ -1046,7 +1296,10 @@ def save_as_docx(
     run.bold = True
     run.font.size = Pt(16)
 
-    # Subtitle
+    # --------------------------------------------------------
+    # SUBTITLE
+    # --------------------------------------------------------
+
     sub = doc.add_paragraph()
 
     sub.alignment = (
@@ -1054,16 +1307,22 @@ def save_as_docx(
     )
 
     sub_run = sub.add_run(
+
         f"Subject: {subject}    |    "
         f"Total Marks: {total_marks}    |    "
-        f"Date: {datetime.now().strftime('%d-%m-%Y')}"
+        f"Date: "
+        f"{datetime.now().strftime('%d-%m-%Y')}"
+
     )
 
     sub_run.font.size = Pt(11)
 
     doc.add_paragraph()
 
-    # Questions
+    # --------------------------------------------------------
+    # PAPER CONTENT
+    # --------------------------------------------------------
+
     for line in paper_text.split("\n"):
 
         line = line.strip()
@@ -1074,34 +1333,54 @@ def save_as_docx(
 
             continue
 
+        lower_line = (
+            line.lower()
+        )
+
+        upper_line = (
+            line.upper()
+        )
+
         if (
-            line.lower().startswith("section")
+            lower_line.startswith(
+                "section"
+            )
             or
-            line.lower().startswith("part")
+            lower_line.startswith(
+                "part"
+            )
         ):
 
-            h = doc.add_paragraph()
+            heading = (
+                doc.add_paragraph()
+            )
 
-            hr = h.add_run(line)
+            heading_run = (
+                heading.add_run(line)
+            )
 
-            hr.bold = True
-            hr.font.size = Pt(13)
+            heading_run.bold = True
+            heading_run.font.size = Pt(13)
 
         elif (
-            line.upper().startswith(
+            upper_line.startswith(
                 "TOTAL MARKS"
             )
             or
-            line.upper().startswith(
+            upper_line.startswith(
                 "TOTAL QUESTIONS"
             )
         ):
 
-            p = doc.add_paragraph()
+            paragraph = (
+                doc.add_paragraph()
+            )
 
-            r = p.add_run(line)
+            bold_run = (
+                paragraph.add_run(line)
+            )
 
-            r.bold = True
+            bold_run.bold = True
 
         else:
 
@@ -1123,41 +1402,70 @@ def save_as_pdf(
 ):
 
     doc = SimpleDocTemplate(
+
         filepath,
+
         pagesize=A4,
+
         topMargin=40,
-        bottomMargin=40
+
+        bottomMargin=40,
+
+        leftMargin=40,
+
+        rightMargin=40,
     )
 
-    styles = getSampleStyleSheet()
+    styles = (
+        getSampleStyleSheet()
+    )
 
     title_style = ParagraphStyle(
+
         "TitleCenter",
+
         parent=styles["Title"],
+
         alignment=TA_CENTER,
-        fontSize=16
+
+        fontSize=16,
     )
 
     sub_style = ParagraphStyle(
+
         "SubCenter",
+
         parent=styles["Normal"],
+
         alignment=TA_CENTER,
-        fontSize=10.5
+
+        fontSize=10.5,
     )
 
     section_style = ParagraphStyle(
+
         "Section",
+
         parent=styles["Heading2"],
+
         fontSize=12.5,
-        spaceBefore=12
+
+        spaceBefore=12,
+
+        spaceAfter=8,
     )
 
     body_style = ParagraphStyle(
+
         "Body",
+
         parent=styles["Normal"],
+
         fontSize=10.5,
+
         spaceAfter=6,
-        leading=15
+
+        leading=15,
     )
 
     story = [
@@ -1168,17 +1476,24 @@ def save_as_pdf(
         ),
 
         Paragraph(
+
             f"Subject: {subject} "
             f"&nbsp;&nbsp;|&nbsp;&nbsp; "
             f"Total Marks: {total_marks} "
             f"&nbsp;&nbsp;|&nbsp;&nbsp; "
-            f"Date: {datetime.now().strftime('%d-%m-%Y')}",
+            f"Date: "
+            f"{datetime.now().strftime('%d-%m-%Y')}",
+
             sub_style
         ),
 
-        Spacer(1, 16)
+        Spacer(1, 16),
 
     ]
+
+    # --------------------------------------------------------
+    # PAPER CONTENT
+    # --------------------------------------------------------
 
     for line in paper_text.split("\n"):
 
@@ -1195,60 +1510,88 @@ def save_as_pdf(
         # Escape ReportLab XML
         safe_line = (
             line
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
+            .replace(
+                "&",
+                "&amp;"
+            )
+            .replace(
+                "<",
+                "&lt;"
+            )
+            .replace(
+                ">",
+                "&gt;"
+            )
+        )
+
+        lower_line = (
+            line.lower()
+        )
+
+        upper_line = (
+            line.upper()
         )
 
         if (
-            line.lower().startswith("section")
+            lower_line.startswith(
+                "section"
+            )
             or
-            line.lower().startswith("part")
+            lower_line.startswith(
+                "part"
+            )
         ):
 
             story.append(
+
                 Paragraph(
                     safe_line,
                     section_style
                 )
+
             )
 
         elif (
-            line.upper().startswith(
+            upper_line.startswith(
                 "TOTAL MARKS"
             )
             or
-            line.upper().startswith(
+            upper_line.startswith(
                 "TOTAL QUESTIONS"
             )
         ):
 
             story.append(
+
                 Paragraph(
                     f"<b>{safe_line}</b>",
                     body_style
                 )
+
             )
 
         else:
 
             story.append(
+
                 Paragraph(
                     safe_line,
                     body_style
                 )
+
             )
 
     doc.build(story)
 
 
 # ============================================================
-# START SERVER
+# LOCAL SERVER
 # ============================================================
 
 if __name__ == "__main__":
 
     app.run(
-        debug=True,
-        port=5000
+        host="0.0.0.0",
+        port=5000,
+        debug=True
     )
