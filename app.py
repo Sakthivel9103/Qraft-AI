@@ -19,8 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-
-GENERATED_DIR = os.path.join(os.path.dirname(__file__), "generated")
+GENERATED_DIR = os.path.join("/tmp", "qraft_generated")
 os.makedirs(GENERATED_DIR, exist_ok=True)
 
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
