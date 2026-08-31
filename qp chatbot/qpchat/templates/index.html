@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Question Paper Assistant</title>
+
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+
+    <!-- HERO SCREEN -->
+    <div class="hero" id="heroScreen">
+
+        <div class="hero__logo qraft-hero-logo">
+    <img
+        src="/static/qraft-logo.png"
+        alt="Qraft Logo"
+    >
+     </div>
+
+        <p class="hero__welcome">QRAFT</p>
+
+        <p class="hero__tagline">
+            Question Paper Assistant
+        </p>
+
+        <div class="hero__divider"></div>
+        <h2>Which exam are you setting?</h2>
+        <div class="hero__grid">
+            <button class="option-card" data-exam="CIA 1">
+                CIA 1
+            </button>
+            <button class="option-card" data-exam="CIA 2">
+                 CIA 2
+            </button>
+            <button class="option-card" data-exam="Model Exam">
+                Model Exam
+            </button>
+            <button class="option-card" data-exam="Semester Exam">
+                 Semester Exam
+            </button>
+        </div>
+    </div>
+    <!-- CHAT SCREEN -->
+    <div class="app" id="chatScreen" style="display:none;">
+        <aside class="sidebar">
+            <button class="new-chat-btn" id="backToHomeBtn">
+                ← Back to home
+            </button>
+            <div class="sidebar__title" id="sidebarExamType">
+                CIA 1
+            </div>
+            <div class="sidebar__hint">
+                Bloom's Taxonomy K-Level Question Paper Generator
+            </div>
+        </aside>
+        <main class="main">
+            <div class="thread" id="chatLog"></div>
+            <div class="composer-wrap">
+                <!-- SETTINGS -->
+                <div class="settings-panel" id="settingsPanel">
+                    <!-- GENERATION MODE -->
+                    <div class="settings-row">
+                        <label>Generation mode</label>
+                        <select id="generation_mode">
+                            <option value="normal">
+                               Normal Question Generation
+                            </option>
+                            <option value="custom">
+                                Custom Question Paper Pattern
+                            </option>
+                        </select>
+                    </div>
+                    <!-- EXAM TITLE -->
+                    <div class="settings-row">
+                        <label>Exam title</label>
+                        <input
+                            type="text"
+                            id="exam_title"
+                            value="Internal Assessment Test">
+                    </div>
+                    <!-- SUBJECT -->
+                    <div class="settings-row">
+                        <label>Subject</label>
+                        <input
+                            type="text"
+                            id="subject"
+                            placeholder="e.g. Python Programming">
+                    </div>
+                    <!-- NORMAL MODE SETTINGS -->
+                    <div id="normalSettings">
+                        <div class="settings-row">
+                            <label>Marks / question</label>
+                            <input
+                                type="number"
+                                id="marks_per_question"
+                                value="5"
+                                min="1">
+                        </div>
+                        <div class="settings-row settings-row--range">
+                            <label>K-Level range</label>
+                            <div class="range-controls">
+                                <select id="start_level"></select>
+                                <span>→</span>
+                                <select id="end_level"></select>
+                            </div>
+                        </div>
+                        <div class="settings-row">
+                            <label>Total question</label>
+                            <input
+                                type="number"
+                                id="total_questions"
+                                value="10"
+                                min="1">
+                        </div>
+                    </div>
+                    <!-- CUSTOM PATTERN SETTINGS -->
+                    <div id="customSettings" style="display:none;">
+                        <h3 class="pattern-title">Custom Question Paper Pattern</h3>
+                        <!-- PART A -->
+                        <div class="pattern-card">
+                            <h3>PART A</h3>
+                            <div class="settings-row">
+                                <label>Questions</label>
+                                <input
+                                    type="number"
+                                    id="partA_questions"
+                                    value="10"
+                                    min="1">
+                            </div>
+                            <div class="settings-row">
+                                <label>Marks</label>
+                                <input
+                                    type="number"
+                                    id="partA_marks"
+                                    value="2"
+                                    min="1">
+                            </div>
+                            <div class="settings-row settings-row--range">
+                                <label>K-Level range</label>
+                                <div class="range-controls">
+                                    <select id="partA_start_level"></select>
+                                    <span>→</span>
+                                    <select id="partA_end_level"></select>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- PART B -->
+                        <div class="pattern-card">
+                            <h3>PART B</h3>
+                            <div class="settings-row">
+                                <label>Questions</label>
+                                <input
+                                    type="number"
+                                    id="partB_questions"
+                                    value="10"
+                                    min="1">
+                            </div>
+                            <div class="settings-row">
+                                <label>Marks</label>
+                                <input
+                                    type="number"
+                                    id="partB_marks"
+                                    value="5"
+                                    min="1">
+                            </div>
+                            <div class="settings-row">
+                                <label>A OR B Choice</label>
+                                <select id="partB_choice">
+                                    <option value="yes">
+                                        Yes
+                                    </option>
+                                    <option value="no">
+                                        No
+                                    </option>
+                                </select>
+                            </div>
+                            <div class="settings-row settings-row--range">
+                                <label>K-Level range</label>
+                                <div class="range-controls">
+                                    <select id="partB_start_level"></select>
+                                    <span>→</span>
+                                    <select id="partB_end_level"></select>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- PART C -->
+                        <div class="pattern-card">
+                            <h3>PART C</h3>
+                            <div class="settings-row">
+                                <label>Questions</label>
+                                <input
+                                    type="number"
+                                    id="partC_questions"
+                                    value="5"
+                                    min="1">
+                            </div>
+
+
+                            <div class="settings-row">
+
+                                <label>Marks</label>
+
+                                <input
+                                    type="number"
+                                    id="partC_marks"
+                                    value="10"
+                                    min="1">
+
+                            </div>
+
+
+                            <div class="settings-row settings-row--range">
+
+                                <label>K-Level range</label>
+
+                                <div class="range-controls">
+
+                                    <select id="partC_start_level"></select>
+
+                                    <span>→</span>
+
+                                    <select id="partC_end_level"></select>
+
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- DOWNLOAD -->
+                    <div class="settings-row">
+
+                        <label>Download format</label>
+
+                        <select id="file_format">
+
+                            <option value="docx">
+                                Word (.docx)
+                            </option>
+
+                            <option value="pdf">
+                                PDF (.pdf)
+                            </option>
+
+                        </select>
+
+                    </div>
+
+
+                    <div
+                        class="settings-total"
+                        id="settingsTotal">
+
+                        0 questions · 0 marks
+
+                    </div>
+
+                </div>
+
+
+                <!-- INPUT -->
+                <div class="composer">
+
+                    <button
+                        class="icon-btn"
+                        id="attachBtn">
+
+                        +
+
+                    </button>
+
+
+                    <input
+                        type="file"
+                        id="fileInput"
+                        accept=".pdf,.docx,.txt"
+                        style="display:none;">
+
+
+                    <button
+                        class="icon-btn"
+                        id="settingsToggle">
+
+                        ⚙
+
+                    </button>
+
+
+                    <textarea
+                        id="core_content"
+                        rows="1"
+                        placeholder="Paste your topic, notes or syllabus here..."></textarea>
+
+
+                    <button
+                        class="send-btn"
+                        id="sendBtn">
+
+                        ↑
+
+                    </button>
+
+                </div>
+
+
+                <div class="composer-note">
+
+                    Question Paper Assistant can make mistakes.
+                    Check the generated paper before using it.
+
+                </div>
+
+            </div>
+
+        </main>
+
+    </div>
+
+
+    <script src="/static/script.js"></script>
+
+</body>
+
+</html>
